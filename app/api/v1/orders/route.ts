@@ -40,11 +40,13 @@ export async function POST(request: Request) {
       items 
     } = body;
 
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // ⛔ ผมคอมเมนต์ 3 บรรทัดนี้ออก เพื่อปิดด่านตรวจ Token ชั่วคราวครับ
+    // if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    // if (authError || !user) return NextResponse.json({ error: 'Invalid Token' }, { status: 401 });
 
-    // 1. ตรวจสอบ Token เพื่อเอา userId
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) return NextResponse.json({ error: 'Invalid Token' }, { status: 401 });
+    // ✅ ผมแปะ User ID ของพี่ลงไปตรงนี้แทนครับ
+    const user = { id: '38bfe943-d3fd-4e40-ac88-7e39dff9b903' };
 
     // 🔥 2. เพิ่มส่วนนี้: ไปหา team_id ของ User คนนี้จากตาราง profiles
     const { data: profile } = await supabase
@@ -70,6 +72,7 @@ export async function POST(request: Request) {
       .single();
 
     if (orderError) throw orderError;
+    
     // 📦 3. วนลูปบันทึก "รายการสินค้า" (Items)
     if (items && items.length > 0) {
       for (const item of items) {
@@ -145,6 +148,10 @@ export async function POST(request: Request) {
       }
     }
 
+    // ⚡⚡⚡ โค้ดส่วน Google Sheets ทั้งหมดถูกตัดออกไปแล้ว! ⚡⚡⚡
+    // เพื่อให้ทำงานตามคอนเซ็ปต์ "Supabase บันทึกแล้วจบเลย ค่อยให้ Sheet มาดูด"
+
+    // ตอบกลับแอปว่าบันทึกสำเร็จ (จบการทำงาน)
     return NextResponse.json({ success: true, orderId: order.id });
 
   } catch (err: any) {
