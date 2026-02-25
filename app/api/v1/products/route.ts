@@ -16,13 +16,18 @@ export async function GET(request: Request) {
     }
 
     let url = `${supabaseUrl}/rest/v1/products?select=*,product_variants(*)&order=id.asc`;
+    
+    // 🚀 จุดที่แก้ใหม่: รองรับการค้นหาครอบจักรวาล
     if (keyword) {
-      url += `&name=ilike.*${keyword}*`;
+      // แปลงพวกช่องว่าง หรืออักขระพิเศษให้ปลอดภัยก่อนส่งไป API
+      const safeKeyword = encodeURIComponent(`*${keyword}*`);
+      // ค้นหาว่า keyword ตรงกับ name "หรือ" ตรงกับ collection
+      url += `&or=(name.ilike.${safeKeyword},collection.ilike.${safeKeyword})`;
     }
 
     const response = await fetch(url, {
       headers: {
-        'apikey': supabaseAnonKey,
+        'apikey': supabaseAnonKey!,
         'Authorization': `Bearer ${supabaseAnonKey}`,
         'Content-Type': 'application/json',
       },
