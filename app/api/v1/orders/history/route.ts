@@ -27,27 +27,39 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 });
     }
 
-    // ✅ 3. ดึงข้อมูลพร้อมระบุ Range
     const { data, error } = await supabase
-      .from('orders')
-      .select(`
-        *,
-        customer_types(name),
-        companies(name),
-        order_items (
-          *,
-          product_categories(name)
+  .from('orders')
+  .select(`
+    id, 
+    created_at, 
+    customer_name,
+    phone,
+    note,
+    customer_types(name),
+    companies(name),
+    order_items (
+      id, 
+      note, 
+      interest_level,
+      images,
+      product_categories(name),
+      order_item_projects (
+        area_sqm,
+        projects (
+          project_name
         )
-      `)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .range(from, to); // <--- 🔥 จุดสำคัญ: ใส่บรรทัดนี้เพื่อตัดแบ่งข้อมูล
-
+      )
+    )
+  `)
+  .eq('user_id', userId)
+  .order('created_at', { ascending: false })
+  .range(from, to);
     if (error) throw error;
 
     return NextResponse.json(data);
 
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  console.error('Full Error Details:', error); // ดูใน Terminal ของคุณว่ามันฟ้องเรื่อง Timeout หรือ RLS หรือไม่
+  return NextResponse.json({ error: error.message }, { status: 500 });
+}
 }
