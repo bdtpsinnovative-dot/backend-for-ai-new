@@ -10,7 +10,7 @@ const supabase = createClient(
 );
 
 // ==========================================================
-// 1. GET Method - ดึงข้อมูลออกมาโชว์ (รวมฟิลด์ใหม่)
+// 1. GET Method
 // ==========================================================
 export async function GET(request: Request) {
   try {
@@ -26,28 +26,25 @@ export async function GET(request: Request) {
         *,
         product_categories(name),
         order_item_projects(
+          id, 
           area_sqm,
-          projects(project_name)
-        ),
-        orders(
-          id,
-          created_at,
-          customer_name,
-          phone,
-          note,
-          is_synced,
-          developer_name,        
+          developer_name,
           designer_name,
           architect_name,
           interior_name,
           home_builder_name,
           turnkey_th_name,
           inhouse_designer_name,
-          profiles(
-            full_name,
-            teams(team_name)
-          ),
-          customer_types(name),
+          projects(id, project_name)
+        ),
+        orders(
+          id,
+          created_at,
+          customer_name,
+          note,
+          is_synced,
+          audit_log,  
+          profiles(full_name, teams(team_name)),
           companies(name)
         )
       `)
@@ -65,7 +62,7 @@ export async function GET(request: Request) {
 }
 
 // ==========================================================
-// 2. PATCH Method - อัปเดตข้อมูล (รองรับการกรอกชื่อรายบทบาท)
+// 2. PATCH Method - อัปเดตข้อมูลแยกตาราง (อันนี้เหมือนเดิมที่ผมแก้ให้)
 // ==========================================================
 export async function PATCH(request: Request) {
   try {
@@ -73,9 +70,9 @@ export async function PATCH(request: Request) {
     const { 
       order_id, 
       project_id, 
+      order_item_project_id, 
       customer_name, 
       project_name,
-      // 💡 รับค่าฟิลด์ใหม่จาก Flutter
       developer_name,
       designer_name,
       architect_name,
@@ -85,35 +82,38 @@ export async function PATCH(request: Request) {
       inhouse_designer_name
     } = body;
 
-    if (!order_id || !project_id) {
+    if (!order_id || !project_id || !order_item_project_id) {
       return NextResponse.json({ error: 'Missing required IDs' }, { status: 400 });
     }
 
-    // 1. อัปเดตตารางแม่ (Orders) พร้อมฟิลด์ใหม่ และเปลี่ยนสถานะกลับเป็น False
     const { error: orderError } = await supabase
       .from('orders')
       .update({ 
         customer_name,
+        is_synced: false 
+      })
+      .eq('id', order_id);
+    if (orderError) throw orderError;
+
+    const { error: projectError } = await supabase
+      .from('projects')
+      .update({ project_name })
+      .eq('id', project_id);
+    if (projectError) throw projectError;
+
+    const { error: relationError } = await supabase
+      .from('order_item_projects')
+      .update({
         developer_name,
         designer_name,
         architect_name,
         interior_name,
         home_builder_name,
         turnkey_th_name,
-        inhouse_designer_name,
-        is_synced: false // 🚨 เพิ่มบรรทัดนี้ เพื่อบอกว่ามีการแก้ไขแล้ว
+        inhouse_designer_name
       })
-      .eq('id', order_id);
-
-    if (orderError) throw orderError;
-
-    // 2. อัปเดตตารางโครงการ (Projects)
-    const { error: projectError } = await supabase
-      .from('projects')
-      .update({ project_name })
-      .eq('id', project_id);
-
-    if (projectError) throw projectError;
+      .eq('id', order_item_project_id);
+    if (relationError) throw relationError;
 
     return NextResponse.json({ message: 'อัปเดตข้อมูลสำเร็จ' });
 
