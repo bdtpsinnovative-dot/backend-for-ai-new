@@ -10,7 +10,7 @@ const supabase = createClient(
 );
 
 // ==========================================================
-// 1. GET Method
+// 1. GET Method (อัปเดต Query ให้ตรงกับโครงสร้างใหม่)
 // ==========================================================
 export async function GET(request: Request) {
   try {
@@ -28,20 +28,21 @@ export async function GET(request: Request) {
         order_item_projects(
           id, 
           area_sqm,
-          developer_name,
-          designer_name,
-          architect_name,
-          interior_name,
-          home_builder_name,
-          turnkey_th_name,
-          inhouse_designer_name,
-          projects(id, project_name)
+          project_name,           
+          account_developer,
+          contact_developer,
+          account_architecture,
+          contact_architecture,
+          account_interior,
+          contact_interior,
+          account_contractor,
+          contact_contractor
         ),
         orders(
           id,
           created_at,
           customer_name,
-          note,
+          phone,               
           is_synced,
           audit_log,  
           profiles(full_name, teams(team_name)),
@@ -62,55 +63,56 @@ export async function GET(request: Request) {
 }
 
 // ==========================================================
-// 2. PATCH Method - อัปเดตข้อมูลแยกตาราง (อันนี้เหมือนเดิมที่ผมแก้ให้)
+// 2. PATCH Method (อัปเดตข้อมูลแบบใหม่ ไม่ต้องไปยุ่งกับตาราง projects แล้ว)
 // ==========================================================
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
     const { 
       order_id, 
-      project_id, 
       order_item_project_id, 
       customer_name, 
-      project_name,
-      developer_name,
-      designer_name,
-      architect_name,
-      interior_name,
-      home_builder_name,
-      turnkey_th_name,
-      inhouse_designer_name
+      phone,             // 👈 เผื่อให้แก้เบอร์โทร/Line ได้ด้วย
+      project_name,      // 👈 เซฟชื่อโปรเจกต์ลงตารางหลานโดยตรง
+      account_developer,
+      contact_developer,
+      account_architecture,
+      contact_architecture,
+      account_interior,
+      contact_interior,
+      account_contractor,
+      contact_contractor
     } = body;
 
-    if (!order_id || !project_id || !order_item_project_id) {
+    // เช็คแค่ 2 ID ก็พอครับ เพราะเราไม่ได้เชื่อมกับตาราง projects หลักแล้ว
+    if (!order_id || !order_item_project_id) {
       return NextResponse.json({ error: 'Missing required IDs' }, { status: 400 });
     }
 
+    // 1. อัปเดตข้อมูลลูกค้าที่ตารางแม่ (orders) และเปลี่ยนสถานะให้ Apps Script ดึงใหม่
     const { error: orderError } = await supabase
       .from('orders')
       .update({ 
         customer_name,
+        phone,
         is_synced: false 
       })
       .eq('id', order_id);
     if (orderError) throw orderError;
 
-    const { error: projectError } = await supabase
-      .from('projects')
-      .update({ project_name })
-      .eq('id', project_id);
-    if (projectError) throw projectError;
-
+    // 2. อัปเดตข้อมูลรายละเอียดที่ตารางหลาน (order_item_projects)
     const { error: relationError } = await supabase
       .from('order_item_projects')
       .update({
-        developer_name,
-        designer_name,
-        architect_name,
-        interior_name,
-        home_builder_name,
-        turnkey_th_name,
-        inhouse_designer_name
+        project_name, // 👈 อัปเดตชื่อโปรเจกต์ตรงนี้เลย
+        account_developer,
+        contact_developer,
+        account_architecture,
+        contact_architecture,
+        account_interior,
+        contact_interior,
+        account_contractor,
+        contact_contractor
       })
       .eq('id', order_item_project_id);
     if (relationError) throw relationError;
