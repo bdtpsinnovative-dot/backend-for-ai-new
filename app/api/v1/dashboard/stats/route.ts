@@ -1,9 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
-// ค่า Config (ดึงจาก .env จะดีที่สุด แต่ใส่ตรงนี้เพื่อให้เห็นภาพครับ)
+// ค่า Config
 const supabaseUrl = process.env.SUPABASE_URL!
-const supabaseServiceKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! // ใช้ Service Key เพื่อให้อ่านข้อมูลได้ชัวร์ๆ
+const supabaseServiceKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! 
 
 export async function POST(req: Request) {
   try {
@@ -26,29 +26,46 @@ export async function POST(req: Request) {
 
     const teamId = profile?.team_id
 
-    // 3. นับยอด "ของฉัน" (My Orders)
-    const { count: myCount } = await supabase
-      .from('orders')
-      .select('*', { count: 'exact', head: true }) // head: true คือนับจำนวนอย่างเดียว ไม่ดึง data
-      .eq('user_id', user.id)
+    // 🌟 3. ดึงข้อมูล "โครงการ" (ตารางหลาน) ทั้งหมดที่ยังไม่ถูกลบ
+    // พร้อมดึง user_id และ team_id จากตารางแม่ ลงมาใช้คำนวณ
+    const { data: projects, error: projectsError } = await supabase
+      .from('order_item_projects')
+      .select(`
+        id,
+        order_items!inner (
+          orders!inner (
+            user_id,
+            team_id
+          )
+        )
+      `)
+      .eq('is_deleted', false) // 👈 ไฮไลท์สำคัญ: ตัดโปรเจกต์ที่โดนลบออกไปเลย
 
-    // 4. นับยอด "ของทีม" (Team Orders - ไม่รวมของฉัน)
+    if (projectsError) throw projectsError
+
+    // 4. เริ่มคำนวณยอด
+    let myCount = 0
     let teamCount = 0
-    if (teamId) {
-      const { count } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('team_id', teamId)
-        .neq('user_id', user.id) // ไม่เอา user_id ของตัวเอง
-      
-      teamCount = count || 0
-    }
+
+    projects?.forEach((proj: any) => {
+      // เข้าถึงข้อมูลตารางแม่ (orders) ที่เรา Join ย้อนขึ้นไป
+      const orderData = proj.order_items?.orders
+      if (!orderData) return
+
+      if (orderData.user_id === user.id) {
+        // ถ้ารหัสตรงกับตัวเอง -> นับเป็นยอด "ของฉัน"
+        myCount++
+      } else if (teamId && orderData.team_id === teamId) {
+        // ถ้ารหัสไม่ตรงตัวเอง แต่ทีมเดียวกัน -> นับเป็นยอด "ของทีม"
+        teamCount++
+      }
+    })
 
     // 5. ส่งค่ากลับไป
     return NextResponse.json({
-      myOrders: myCount || 0,
+      myOrders: myCount,
       teamOrders: teamCount,
-      totalOrders: (myCount || 0) + teamCount
+      totalOrders: myCount + teamCount
     })
 
   } catch (error) {
