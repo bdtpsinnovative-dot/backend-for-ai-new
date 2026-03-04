@@ -27,11 +27,9 @@ export async function GET(request: Request) {
         id, 
         created_at, 
         customer_name,
-       
         companies(name),
         order_items (
           id, 
-         
           interest_level,
           images,
           product_categories(name),
@@ -42,6 +40,8 @@ export async function GET(request: Request) {
         )
       `)
       .eq('user_id', userId)
+      // 🌟 เพิ่มเงื่อนไขนี้ (ทะลุลงไป 2 ชั้น) เพื่อซ่อนโปรเจกต์ที่โดนลบ
+      .eq('order_items.order_item_projects.is_deleted', false)
       .order('created_at', { ascending: false })
       .range(from, to);
   

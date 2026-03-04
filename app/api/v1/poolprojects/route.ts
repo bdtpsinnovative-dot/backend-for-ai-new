@@ -10,7 +10,7 @@ const supabase = createClient(
 );
 
 // ==========================================================
-// 1. GET Method (อัปเดต Query ให้ตรงกับโครงสร้างใหม่)
+// 1. GET Method (ฉบับแก้ไขเพื่อให้กรองข้อมูลที่ลบแล้วออกถาวร)
 // ==========================================================
 export async function GET(request: Request) {
   try {
@@ -25,10 +25,10 @@ export async function GET(request: Request) {
       .select(`
         *,
         product_categories(name),
-        order_item_projects(
+        order_item_projects!inner(  
           id, 
           area_sqm,
-          project_name,           
+          project_name,          
           account_developer,
           contact_developer,
           account_architecture,
@@ -36,19 +36,22 @@ export async function GET(request: Request) {
           account_interior,
           contact_interior,
           account_contractor,
-          contact_contractor
+          contact_contractor,
+          is_deleted
         ),
         orders(
           id,
           created_at,
           customer_name,
-          phone,               
+          phone,              
           is_synced,
           audit_log,  
           profiles(full_name, teams(team_name)),
           companies(name)
         )
       `)
+      // 🌟 เงื่อนไขนี้จะทำงานร่วมกับ !inner เพื่อตัดรายการ order_items ทิ้งไปเลยถ้าโครงการโดนลบ
+      .eq('order_item_projects.is_deleted', false) 
       .order('created_at', { ascending: false })
       .range(from, to);
 
@@ -61,7 +64,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-
 // ==========================================================
 // 2. PATCH Method (อัปเดตข้อมูลแบบใหม่ ไม่ต้องไปยุ่งกับตาราง projects แล้ว)
 // ==========================================================
