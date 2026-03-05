@@ -1,0 +1,52 @@
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+// สร้าง Supabase Client โดยใช้ Service Role Key (กุญแจผี)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+export async function POST(req: Request) {
+  try {
+    // 1. ตรวจสอบรหัสลับ (Security Check)
+    const apiKey = req.headers.get('x-api-key');
+    if (apiKey !== process.env.SHEETS_SECRET_KEY) {
+      return NextResponse.json({ error: 'Unauthorized: Invalid API Key' }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { action, payload } = body;
+
+    // 2. แยกการทำงานตาม Action ที่ Google Sheet ส่งมา
+    if (action === 'mark_synced') {
+      // อัปเดตตาราง orders ให้ is_synced = true
+      const { orderIds } = payload;
+      const { error } = await supabase
+        .from('orders')
+        .update({ is_synced: true })
+        .in('id', orderIds);
+
+      if (error) throw error;
+      return NextResponse.json({ success: true, message: 'Orders marked as synced' });
+    } 
+    
+    else if (action === 'update_project') {
+      // แก้ไขหรือลบข้อมูลในตาราง order_item_projects
+      const { id, updates } = payload;
+      const { error } = await supabase
+        .from('order_item_projects')
+        .update(updates)
+        .eq('id', id);
+
+      if (error) throw error;
+      return NextResponse.json({ success: true, message: 'Project updated successfully' });
+    }
+
+    // ถ้าส่ง Action มาผิด
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+
+  } catch (error: any) {
+    console.error('Webhook Error:', error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
