@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 // ค่า Config
 const supabaseUrl = process.env.SUPABASE_URL!
-const supabaseServiceKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! 
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
 export async function POST(req: Request) {
   try {

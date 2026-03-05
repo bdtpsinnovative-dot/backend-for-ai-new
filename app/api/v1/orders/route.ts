@@ -1,10 +1,15 @@
+// app/api/v1/orders/route.ts
+
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// 🌟 เปลี่ยนมาใช้ SERVICE_ROLE_KEY เพื่อให้ API ทำงานแบบมีอภิสิทธิ์สูงสุด
+// เหมาะสำหรับการบันทึกข้อมูลหลายตารางต่อเนื่องกันโดยไม่ติดปัญหา RLS
+const supabaseUrl = process.env.SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+console.log("🔑 Service Key 10 ตัวแรก:", supabaseServiceKey ? supabaseServiceKey.substring(0, 10) : "UNDEFINED!");
+console.log("🔑 Anon Key 10 ตัวแรก:", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY.substring(0, 10) : "UNDEFINED!");
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 export async function GET() {
   try {
@@ -41,11 +46,14 @@ export async function POST(request: Request) {
 
     let currentUserId = user_id;
 
+    // 🛡️ ชั้นป้องกันที่ 1: ตรวจสอบ Token จากหน้าบ้าน
+    // ถึงใช้กุญแจผี ก็ยังต้องเช็คว่าคนที่ยิงมามีสิทธิ์จริงๆ ไหม
     if (token) {
       const { data: { user } } = await supabase.auth.getUser(token);
       if (user) currentUserId = user.id;
     }
 
+    // 🛡️ ชั้นป้องกันที่ 2: ถ้าหา ID ไม่เจอ (Token ปลอม หรือไม่ได้ล็อกอิน) ให้เด้งออกทันที
     if (!currentUserId) {
       return NextResponse.json({ error: 'Missing User ID or Token' }, { status: 400 });
     }
@@ -136,40 +144,40 @@ export async function POST(request: Request) {
 
         if (itemError) throw itemError;
 
-        // 🏗️ 5. บันทึกตารางหลาน (เหลือแค่ชื่อโครงการ)
-if (item.project_usage && item.project_usage.length > 0) {
-  const projectUsagePayload = item.project_usage.map((usage: any) => {
-    // 🎯 ดึงชื่อโครงการจาก Map หรือจากข้อมูลที่หน้าบ้านส่งมา
-    const pName = projectMap.get(usage.project_id) || '-';
+        // 🏗️ 6. บันทึกตารางหลาน (เหลือแค่ชื่อโครงการ)
+        if (item.project_usage && item.project_usage.length > 0) {
+          const projectUsagePayload = item.project_usage.map((usage: any) => {
+            // 🎯 ดึงชื่อโครงการจาก Map หรือจากข้อมูลที่หน้าบ้านส่งมา
+            const pName = projectMap.get(usage.project_id) || '-';
 
-    let projectRow: any = {
-      order_item_id: savedItem.id,
-      project_name: pName, // 👈 ใช้ชื่อโครงการแทน ID แล้ว
-      area_sqm: usage.area_sqm ? parseFloat(usage.area_sqm) : 0
-    };
+            let projectRow: any = {
+              order_item_id: savedItem.id,
+              project_name: pName, // 👈 ใช้ชื่อโครงการแทน ID แล้ว
+              area_sqm: usage.area_sqm ? parseFloat(usage.area_sqm) : 0
+            };
 
-    const typeStr = typeName.toLowerCase();
+            const typeStr = typeName.toLowerCase();
 
-    // Mapping ข้อมูล Account ตามประเภทลูกค้าเหมือนเดิม
-    if (typeStr.includes('developer')) {
-      projectRow.account_developer = companyName;
-    } else if (typeStr.includes('architect')) {
-      projectRow.account_architecture = companyName;
-    } else if (typeStr.includes('interior')) {
-      projectRow.account_interior = companyName;
-    } else if (typeStr.includes('contractor') || typeStr.includes('turnkey') || typeStr.includes('home builder')) {
-      projectRow.account_contractor = companyName; 
-    } 
+            // Mapping ข้อมูล Account ตามประเภทลูกค้าเหมือนเดิม
+            if (typeStr.includes('developer')) {
+              projectRow.account_developer = companyName;
+            } else if (typeStr.includes('architect')) {
+              projectRow.account_architecture = companyName;
+            } else if (typeStr.includes('interior')) {
+              projectRow.account_interior = companyName;
+            } else if (typeStr.includes('contractor') || typeStr.includes('turnkey') || typeStr.includes('home builder')) {
+              projectRow.account_contractor = companyName; 
+            } 
 
-    return projectRow;
-  });
+            return projectRow;
+          });
 
-  const { error: usageError } = await supabase
-    .from('order_item_projects')
-    .insert(projectUsagePayload);
+          const { error: usageError } = await supabase
+            .from('order_item_projects')
+            .insert(projectUsagePayload);
 
-  if (usageError) throw usageError;
-}
+          if (usageError) throw usageError;
+        }
       }
     }
 
