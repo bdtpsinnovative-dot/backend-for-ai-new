@@ -1,10 +1,31 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// สร้าง Supabase Client โดยใช้ Service Role Key (กุญแจผี)
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+// 🟢 เพิ่มฟังก์ชัน GET สำหรับให้ชีตดึงข้อมูล
+export async function GET(req: Request) {
+  try {
+    const apiKey = req.headers.get('x-api-key');
+    if (apiKey !== process.env.SHEETS_SECRET_KEY) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // ดึงข้อมูลด้วยกุญแจผีจากเซิร์ฟเวอร์
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id,customer_name,phone,created_at,teams(*),profiles(*),order_items(interest_level,note,images,product_categories(name),order_item_projects(id,project_name,area_sqm,account_developer,contact_developer,account_architecture,contact_architecture,account_interior,contact_interior,account_contractor,contact_contractor))')
+      .eq('is_synced', false);
+
+    if (error) throw error;
+    
+    return NextResponse.json(data);
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
 
 export async function POST(req: Request) {
   try {
