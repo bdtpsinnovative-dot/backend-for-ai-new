@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pipeline, env } from '@xenova/transformers';
 import { createClient } from '@supabase/supabase-js';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 
-// 🌟 1. ตั้งค่า Environment สำหรับ Vercel (Serverless) โดยเฉพาะ
-env.allowLocalModels = false; // ป้องกันการหาโมเดลในโฟลเดอร์ local (Vercel ไม่มี)
-env.useBrowserCache = false;  // ปิด Cache ของ Browser เพราะเรารันบน Server
+// 🌟 1. ตั้งค่า Environment สำหรับ Vercel
+env.allowLocalModels = false; 
+env.useBrowserCache = false;  
 
-// 🚀 2. บังคับใช้ WASM แทน C++ Binary (แก้ Error libonnxruntime)
+// 🚀 2. บังคับใช้ WASM 
 if (env.backends?.onnx?.wasm) {
     env.backends.onnx.wasm.proxy = false;
-    env.backends.onnx.wasm.numThreads = 1; // จำกัด Thread ป้องกัน Vercel เมมโมรี่เต็ม
+    env.backends.onnx.wasm.numThreads = 1; // ป้องกันแรม Vercel เต็ม
 }
 
 let extractor: any = null;
@@ -23,27 +20,29 @@ function normalize(vector: number[]) {
 }
 
 export async function POST(req: NextRequest) {
-    let tempFilePath = '';
     try {
         const formData = await req.formData();
         const imageFile = formData.get('image') as File;
         if (!imageFile) return NextResponse.json({ error: "กรุณาอัปโหลดรูปภาพ" }, { status: 400 });
 
-        // 🌟 โหลดโมเดล (จะถูกโหลดผ่าน WASM แทน Binary)
         if (!extractor) {
             extractor = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
         }
         
-        const buffer = Buffer.from(await imageFile.arrayBuffer());
+        const arrayBuffer = await imageFile.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const base64Image = buffer.toString("base64");
         
-        // Vercel อนุญาตให้เขียนไฟล์ลงในโฟลเดอร์ /tmp เท่านั้น (os.tmpdir() ปลอดภัยครับ)
-        tempFilePath = path.join(os.tmpdir(), `ai-search-${Date.now()}.jpg`);
-        fs.writeFileSync(tempFilePath, buffer); 
+        let mimeType = imageFile.type;
+        if (!mimeType || mimeType === 'application/octet-stream') {
+            mimeType = 'image/jpeg'; 
+        }
 
-        const output = await extractor(tempFilePath);
+        // 🌟 3. จุดเปลี่ยนสำคัญ: เราแปลงภาพเป็น Data URI เพื่อส่งให้ AI โดยไม่ต้องเซฟไฟล์ (ลบ fs ทิ้งไปเลย)
+        const dataUri = `data:${mimeType};base64,${base64Image}`;
+        
+        const output = await extractor(dataUri);
         const normalizedEmbedding = normalize(Array.from(output.data) as number[]);
-
-        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
 
         const supabase = createClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -61,16 +60,8 @@ export async function POST(req: NextRequest) {
         // 🤖 ถ้าไม่เจอสินค้าในระบบ ให้ Gemini ช่วยตอบ
         if (!products || products.length === 0) {
             const apiKey = process.env.GEMINI_API_KEY;
-            const base64Image = buffer.toString("base64");
             
-            // 🚨 ดักจับและบังคับเปลี่ยนประเภทไฟล์ให้ Gemini อ่านออก 100%
-            let mimeType = imageFile.type;
-            if (!mimeType || mimeType === 'application/octet-stream') {
-                mimeType = 'image/jpeg'; 
-            }
-
             try {
-                // 🚨 เปลี่ยนเป้าหมายไปที่รุ่น gemini-2.5-flash
                 const response = await fetch(
                     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
                     {
@@ -94,9 +85,7 @@ export async function POST(req: NextRequest) {
 
                 const data = await response.json();
 
-                if (data.error) {
-                    throw new Error(data.error.message);
-                }
+                if (data.error) throw new Error(data.error.message);
 
                 const aiMessage = data.candidates[0].content.parts[0].text;
 
@@ -119,7 +108,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ message: "ค้นหาสำเร็จ!", products: products });
 
     } catch (error: any) {
-        if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
         console.error("API Error:", error);
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
