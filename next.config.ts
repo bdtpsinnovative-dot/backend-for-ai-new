@@ -1,17 +1,16 @@
-// next.config.ts
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // 🌟 1. ไม้ตาย: หลอก Vercel ให้ข้ามไฟล์ C++ แล้วไปใช้ WASM แทน
+  // 🌟 1. ไม้ตาย: หลอก Vercel ให้ข้ามไฟล์ C++ แล้วไปใช้ WASM แทน เพื่อรัน AI
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
-      "onnxruntime-node$": false, // ตัดจบปัญหา Error libonnxruntime ทันที
+      "onnxruntime-node$": false, 
     };
     return config;
   },
 
-  // 🌐 2. ส่วนของ CORS ที่พี่ชายทำไว้ (รักษาไว้เหมือนเดิมครับ)
+  // 🌐 2. ตั้งค่า CORS ให้แอป Flutter และหน้าเว็บเรียกใช้งานได้จากทุกที่
   async headers() {
     return [
       {

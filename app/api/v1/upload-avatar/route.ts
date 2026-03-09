@@ -1,8 +1,9 @@
 //app/api/v1/upload-avatar/route.ts
+
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import sharp from 'sharp'; // ✅ ใช้สำหรับบีบอัดรูปภาพ
-
+export const dynamic = 'force-dynamic'; // 🌟 บังคับให้เป็น Dynamic ตลอดเวลา
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
