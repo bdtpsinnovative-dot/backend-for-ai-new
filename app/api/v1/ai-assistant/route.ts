@@ -5,7 +5,16 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-env.allowLocalModels = false;
+// 🌟 1. ตั้งค่า Environment สำหรับ Vercel (Serverless) โดยเฉพาะ
+env.allowLocalModels = false; // ป้องกันการหาโมเดลในโฟลเดอร์ local (Vercel ไม่มี)
+env.useBrowserCache = false;  // ปิด Cache ของ Browser เพราะเรารันบน Server
+
+// 🚀 2. บังคับใช้ WASM แทน C++ Binary (แก้ Error libonnxruntime)
+if (env.backends?.onnx?.wasm) {
+    env.backends.onnx.wasm.proxy = false;
+    env.backends.onnx.wasm.numThreads = 1; // จำกัด Thread ป้องกัน Vercel เมมโมรี่เต็ม
+}
+
 let extractor: any = null;
 
 function normalize(vector: number[]) {
@@ -20,11 +29,14 @@ export async function POST(req: NextRequest) {
         const imageFile = formData.get('image') as File;
         if (!imageFile) return NextResponse.json({ error: "กรุณาอัปโหลดรูปภาพ" }, { status: 400 });
 
+        // 🌟 โหลดโมเดล (จะถูกโหลดผ่าน WASM แทน Binary)
         if (!extractor) {
             extractor = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
         }
         
         const buffer = Buffer.from(await imageFile.arrayBuffer());
+        
+        // Vercel อนุญาตให้เขียนไฟล์ลงในโฟลเดอร์ /tmp เท่านั้น (os.tmpdir() ปลอดภัยครับ)
         tempFilePath = path.join(os.tmpdir(), `ai-search-${Date.now()}.jpg`);
         fs.writeFileSync(tempFilePath, buffer); 
 
@@ -46,18 +58,19 @@ export async function POST(req: NextRequest) {
 
         if (dbError) throw dbError;
 
+        // 🤖 ถ้าไม่เจอสินค้าในระบบ ให้ Gemini ช่วยตอบ
         if (!products || products.length === 0) {
             const apiKey = process.env.GEMINI_API_KEY;
             const base64Image = buffer.toString("base64");
             
-            // 🚨 โค้ดใหม่: ดักจับและบังคับเปลี่ยนประเภทไฟล์ให้ Gemini อ่านออก 100%
+            // 🚨 ดักจับและบังคับเปลี่ยนประเภทไฟล์ให้ Gemini อ่านออก 100%
             let mimeType = imageFile.type;
             if (!mimeType || mimeType === 'application/octet-stream') {
                 mimeType = 'image/jpeg'; 
             }
 
             try {
-                // 🚨 เปลี่ยนเป้าหมายไปที่รุ่น gemini-2.5-flash ตามที่ API Key ของเฮียรองรับ!
+                // 🚨 เปลี่ยนเป้าหมายไปที่รุ่น gemini-2.5-flash
                 const response = await fetch(
                     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
                     {
