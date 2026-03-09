@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pipeline, env, RawImage } from '@xenova/transformers';
 import { createClient } from '@supabase/supabase-js';
+import sharp from 'sharp'; // 🌟 1. ดึงพระเอกของเรามาใช้แกะภาพดิบ
 
-// 🌟 1. ตั้งค่า Environment สำหรับ Vercel
+// 🌟 2. ตั้งค่า Environment สำหรับ Vercel
 env.allowLocalModels = false; 
 env.useBrowserCache = false;  
 
-// 🚀 2. บังคับใช้ WASM 
+// 🚀 3. บังคับใช้ WASM 
 if (env.backends?.onnx?.wasm) {
     env.backends.onnx.wasm.proxy = false;
     env.backends.onnx.wasm.numThreads = 1; 
@@ -32,17 +33,24 @@ export async function POST(req: NextRequest) {
         const arrayBuffer = await imageFile.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         
-        // 🌟 เก็บ Base64 ไว้ส่งให้ Gemini
+        // เก็บ Base64 ไว้ให้ลูกพี่ Gemini
         const base64Image = buffer.toString("base64");
-        
         let mimeType = imageFile.type;
         if (!mimeType || mimeType === 'application/octet-stream') {
             mimeType = 'image/jpeg'; 
         }
 
-        // 🚀 4. จุดที่ TypeScript งอแง: เราใส่ (buffer as any) เพื่อข้ามการตรวจประเภทครับ
-        // วิธีนี้จะทำให้ Build ผ่าน และรันได้จริง 100% เพราะ Transformers.js อ่าน Buffer ได้ครับ
-        const image = await RawImage.read(buffer as any);
+        // 🚀 4. จุดแก้ปัญหาไม้ตาย: ใช้ Sharp แกะภาพเป็น Pixel ดิบๆ
+        // วิธีนี้จะทำงานบนแรม (Memory) ไวมาก และ TypeScript ยอมรับ 100% ครับ!
+        const { data, info } = await sharp(buffer)
+            .toColorspace('srgb') // แปลงให้เป็นสีมาตรฐานที่ AI ชอบ
+            .raw() // ถอดเป็นข้อมูลพิกเซลดิบ
+            .toBuffer({ resolveWithObject: true });
+
+        // สร้างภาพจำลองขึ้นมาใหม่จากข้อมูลพิกเซลดิบ
+        const image = new RawImage(data, info.width, info.height, info.channels);
+        
+        // ยัดให้ AI แปลงเวกเตอร์ได้เลย!
         const output = await extractor(image);
         
         const normalizedEmbedding = normalize(Array.from(output.data) as number[]);
