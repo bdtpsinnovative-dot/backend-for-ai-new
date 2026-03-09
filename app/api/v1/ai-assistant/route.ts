@@ -19,7 +19,12 @@ function normalize(vector: number[]) {
     const magnitude = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
     return vector.map(val => val / magnitude);
 }
-
+export const config = {
+  api: {
+    bodyParser: false, // ปิด bodyParser ปกติ เพราะเราใช้ formData
+    responseLimit: '10mb',
+  },
+};
 export async function POST(req: NextRequest) {
     try {
         const formData = await req.formData();
