@@ -7,8 +7,14 @@ export async function GET(request: Request) {
     const keyword = searchParams.get('keyword') || '';
 
     // ✅ ดึงจาก .env ตามความฉลาดของพี่ชายเป๊ะๆ ปลอดภัย 100%
-    const supabaseUrl = process.env.ปปปปปปปปปป || process.env.SUPABASE_URL;
-    const supabaseAnonKey = process.env.ปปปปปปปปปปป || process.env.SUPABASE_ANON_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL! || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! || process.env.SUPABASE_ANON_KEY;
+
+
+    //process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    //process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+
+
 
     // ดักไว้หน่อย เผื่อลืมใส่ .env
     if (!supabaseUrl || !supabaseAnonKey) {
