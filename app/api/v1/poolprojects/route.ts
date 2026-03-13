@@ -119,7 +119,8 @@ export async function PATCH(request: Request) {
       account_developer, contact_developer,
       account_architecture, contact_architecture,
       account_interior, contact_interior,
-      account_contractor, contact_contractor
+      account_contractor, contact_contractor,
+      note
     } = body;
 
     if (!token) {
@@ -145,6 +146,14 @@ export async function PATCH(request: Request) {
         .update({ customer_name, phone, is_synced: false })
         .eq('id', order_id);
       if (orderError) throw orderError;
+    }
+    if (note !== undefined) {
+      // อัปเดต note ให้กับทุก order_items ที่อยู่ใน order_id นี้
+      const { error: noteError } = await supabase
+        .from('order_items')
+        .update({ note: note })
+        .eq('order_id', order_id); 
+      if (noteError) throw noteError;
     }
 
     if (order_item_project_id) {
