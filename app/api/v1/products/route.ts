@@ -5,11 +5,13 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const keyword = searchParams.get('keyword') || '';
-
+    
     // ✅ ดึงจาก .env ตามความฉลาดของพี่ชายเป๊ะๆ ปลอดภัย 100%
-    const supabaseUrl = process.env.ปปปปปปปปปป || process.env.SUPABASE_URL;
-    const supabaseAnonKey = process.env.ปปปปปปปปปปป || process.env.SUPABASE_ANON_KEY;
-
+    const supabaseUrl = process.env.SUPABASE_URL! || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.SUPABASE_URL! || process.env.SUPABASE_ANON_KEY;
+console.log("👉 URL:", supabaseUrl);
+    console.log("👉 Key 10 ตัวแรก:", supabaseAnonKey?.substring(0, 10), "...");
+    console.log("👉 ความยาว Key:", supabaseAnonKey?.length, "ตัวอักษร");
     // ดักไว้หน่อย เผื่อลืมใส่ .env
     if (!supabaseUrl || !supabaseAnonKey) {
       return NextResponse.json({ error: 'Server Config Error: Missing Supabase Env Variables' }, { status: 500 });
