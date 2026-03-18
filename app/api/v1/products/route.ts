@@ -7,8 +7,8 @@ export async function GET(request: Request) {
     const keyword = searchParams.get('keyword') || '';
     
     // ✅ ดึงจาก .env ตามความฉลาดของพี่ชายเป๊ะๆ ปลอดภัย 100%
-    const supabaseUrl = process.env.SUPABASE_URLx;
-      const supabaseAnonKey = process.env.SUPABASE_SERVICE_ROLE_KEYx;
+    const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseAnonKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     // ดักไว้หน่อย เผื่อลืมใส่ .env
     if (!supabaseUrl || !supabaseAnonKey) {
