@@ -10,12 +10,18 @@ const AI_API_KEY = process.env.GEMINI_API_KEY;
 let aiCache: { [key: string]: { data: any; timestamp: number } } = {};
 const CACHE_DURATION = 10 * 60 * 1000; 
 
+// 🛡️ ฟังก์ชันพระเอก! เปลี่ยนทุกอย่างให้เป็น Array ป้องกันการ Crash เวลา Supabase ส่ง Object มา
+const toArray = (data: any) => {
+  if (!data) return [];
+  return Array.isArray(data) ? data : [data];
+};
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const filter = searchParams.get('filter') || 'all';
-    const teamFilter = searchParams.get('team') || 'all'; // 🌟 รับค่าทีม
-    const personFilter = searchParams.get('person') || 'all'; // 🌟 รับค่าบุคคล
+    const teamFilter = searchParams.get('team') || 'all'; 
+    const personFilter = searchParams.get('person') || 'all'; 
 
     const cacheKey = `${filter}_${teamFilter}_${personFilter}`;
     const now = Date.now();
@@ -51,33 +57,60 @@ export async function GET(request: Request) {
     if (startDate) query = query.gte('created_at', startDate);
 
     const { data: rawStats, error: dbError } = await query;
-    if (dbError || !rawStats) throw new Error("ดึงข้อมูลจาก Database ไม่สำเร็จ");
+    if (dbError) throw new Error(`DB Error: ${dbError.message}`);
+    if (!rawStats) throw new Error("ไม่พบข้อมูล");
 
-    // 🌟 ดึงชื่อทีมและบุคคลทั้งหมดส่งกลับไปให้แอปทำ Dropdown
-    const availableTeams = [...new Set(rawStats.map(s => s.order_items?.orders?.teams?.team_name).filter(Boolean))];
-    const availablePersons = [...new Set(rawStats.map(s => s.order_items?.orders?.profiles?.full_name).filter(Boolean))];
+    // 🌟 ดึงชื่อทีมและบุคคลโดยใช้ toArray() ครอบ ป้องกัน Error ชะงัดนัก!
+    const availableTeams = [...new Set(
+      rawStats.flatMap((s: any) => 
+        toArray(s.order_items).flatMap((item: any) => 
+          toArray(item.orders).map((o: any) => o?.teams?.team_name)
+        )
+      ).filter(Boolean)
+    )];
 
-    // 🌟 กรองข้อมูลตามที่แอดมินเลือก
+    const availablePersons = [...new Set(
+      rawStats.flatMap((s: any) => 
+        toArray(s.order_items).flatMap((item: any) => 
+          toArray(item.orders).map((o: any) => o?.profiles?.full_name)
+        )
+      ).filter(Boolean)
+    )];
+
+    // 🌟 กรองข้อมูลอย่างปลอดภัย
     let stats = rawStats;
     if (teamFilter !== 'all') {
-      stats = stats.filter(s => s.order_items?.orders?.teams?.team_name === teamFilter);
+      stats = stats.filter((s: any) => 
+        toArray(s.order_items).some((item: any) => 
+          toArray(item.orders).some((o: any) => o?.teams?.team_name === teamFilter)
+        )
+      );
     }
     if (personFilter !== 'all') {
-      stats = stats.filter(s => s.order_items?.orders?.profiles?.full_name === personFilter);
+      stats = stats.filter((s: any) => 
+        toArray(s.order_items).some((item: any) => 
+          toArray(item.orders).some((o: any) => o?.profiles?.full_name === personFilter)
+        )
+      );
     }
 
     const totalOrders = stats.length;
-    const totalSqm = stats.reduce((acc, curr) => acc + (Number(curr.area_sqm) || 0), 0);
-    const importantCount = stats.filter(s => s.is_important).length;
+    const totalSqm = stats.reduce((acc: number, curr: any) => acc + (Number(curr.area_sqm) || 0), 0);
+    const importantCount = stats.filter((s: any) => s.is_important).length;
     
     const teamSummary: any = {};
-    const personSummary: any = {}; // 🌟 สถิติรายบุคคล
+    const personSummary: any = {}; 
 
+    // 🌟 สรุปผลอย่างปลอดภัย ไร้กังวลเรื่อง Array
     stats.forEach((s: any) => {
-      const teamName = s.order_items?.orders?.teams?.team_name || 'ไม่มีทีม';
-      const personName = s.order_items?.orders?.profiles?.full_name || 'ไม่ระบุตัวตน';
-      teamSummary[teamName] = (teamSummary[teamName] || 0) + 1;
-      personSummary[personName] = (personSummary[personName] || 0) + 1;
+      toArray(s.order_items).forEach((item: any) => {
+        toArray(item.orders).forEach((o: any) => {
+          const teamName = o?.teams?.team_name || 'ไม่มีทีม';
+          const personName = o?.profiles?.full_name || 'ไม่ระบุตัวตน';
+          teamSummary[teamName] = (teamSummary[teamName] || 0) + 1;
+          personSummary[personName] = (personSummary[personName] || 0) + 1;
+        });
+      });
     });
 
     let aiSummary = "";
@@ -111,14 +144,14 @@ export async function GET(request: Request) {
       time_filter: filter,
       time_label: timeLabel,
       ai_insight: aiSummary,
-      available_teams: availableTeams,     // 🌟 ส่งลิสต์ทีม
-      available_persons: availablePersons, // 🌟 ส่งลิสต์รายชื่อ
+      available_teams: availableTeams,
+      available_persons: availablePersons,
       stats: { 
         total_orders: totalOrders, 
         total_area_sqm: totalSqm.toFixed(2), 
         important_count: importantCount, 
         team_performance: teamSummary,
-        person_performance: personSummary  // 🌟 ส่งอันดับบุคคล
+        person_performance: personSummary
       }
     };
 
@@ -128,6 +161,8 @@ export async function GET(request: Request) {
     return NextResponse.json(finalResponse);
 
   } catch (error: any) {
+    // 🚨 ถ้ารันแล้วยังพัง มันจะปริ้นบอกใน Terminal ชัดเจนเลยครับ!
+    console.error("💥 [API ERROR]:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
