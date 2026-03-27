@@ -1,4 +1,4 @@
-//app/api/v1/poolprojects/route.ts
+// app/api/v1/poolprojects/route.ts
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
@@ -28,20 +28,23 @@ export async function GET(request: Request) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '150'); 
     const scope = searchParams.get('scope') || 'all'; 
+    
+    // ✅ รับค่าค้นหา
+    const searchKeyword = searchParams.get('search') || ''; 
+    console.log("🔍 คำค้นหาที่รับมาจากแอปคือ:", searchKeyword);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-   const { data: profileData } = await supabase
-    .from('profiles')
-    .select('team_id')
-    .eq('id', user.id)
-    .single();
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('team_id')
+      .eq('id', user.id)
+      .single();
 
-  // 🌟 พิมพ์บรรทัดนี้ลงไปเพื่อพิสูจน์
-  console.log("==== รันไฟล์นี้อยู่จริงๆ คอนเฟิร์ม! ====");
+    console.log("==== รันไฟล์นี้อยู่จริงๆ คอนเฟิร์ม! ====");
 
-  let query = supabase
-    .from('order_items')
+    let query = supabase
+      .from('order_items')
       .select(`
         *,
         product_categories(name),
@@ -82,6 +85,11 @@ export async function GET(request: Request) {
       query = query.eq('orders.user_id', user.id); 
     } else if (scope === 'team' && profileData?.team_id) {
       query = query.eq('orders.team_id', profileData.team_id); 
+    }
+
+    // ✅ แทรกเงื่อนไขการค้นหาตรงนี้
+    if (searchKeyword.trim() !== '') {
+      query = query.ilike('order_item_projects.project_name', `%${searchKeyword}%`);
     }
 
     const { data, count, error } = await query.range(from, to);

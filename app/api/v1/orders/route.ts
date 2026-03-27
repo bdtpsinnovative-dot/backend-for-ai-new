@@ -165,24 +165,31 @@ export async function POST(request: Request) {
     }
 
     // ==================================================
-    // 🔔 5. สร้างประวัติแจ้งเตือนลง DB + ยิง FCM ไปหามือถือ
+    // 🔔 5. สร้างประวัติแจ้งเตือนลง DB + ยิง FCM แบบแยกเงื่อนไข
     // ==================================================
-    if (team_id) {
-      try {
-        // 🌟 ดึงข้อมูลเพื่อนในทีมทุกคน "รวมถึงคนที่ไม่ได้เปิดแจ้งเตือน" เพื่อบันทึกลง DB
-        const { data: teamMembers } = await supabase
-          .from('profiles')
-          .select('id, fcm_token') // ดึง id มาด้วยเพื่อใช้เป็น recipient_id
-          .eq('team_id', team_id)
-          .neq('id', currentUserId);
+    try {
+      // 1. ดึงข้อมูล User ทุกคน (ยกเว้นตัวเอง) พร้อมค่า Setting
+      const { data: allUsers } = await supabase
+        .from('profiles')
+        .select('id, fcm_token, team_id, noti_level, is_muted')
+        .neq('id', currentUserId);
 
-        if (teamMembers && teamMembers.length > 0) {
+      if (allUsers && allUsers.length > 0) {
+        // 2. กรองผู้ที่จะได้รับแจ้งเตือนตามเงื่อนไข
+        const recipients = allUsers.filter(member => {
+          if (member.noti_level === 'none') return false; 
+          if (member.noti_level === 'all') return true;  
+          if (member.noti_level === 'team' && member.team_id === team_id) return true; 
+          return false;
+        });
+
+        if (recipients.length > 0) {
           const customerDisplay = companyName || customer_name || 'ลูกค้าทั่วไป';
           const title = 'ออเดอร์ใหม่เข้าทีม!';
           const bodyMsg = `${creatorName} เพิ่มรายการจาก ${customerDisplay}`;
 
-          // 💾 A. บันทึกประวัติแจ้งเตือนลง Database ก่อน
-          const notificationPayloads = teamMembers.map(member => ({
+          // บันทึกลงตาราง notifications
+          const notificationPayloads = recipients.map(member => ({
             recipient_id: member.id,
             creator_id: currentUserId,
             title: title,
@@ -193,29 +200,45 @@ export async function POST(request: Request) {
           const { error: dbError } = await supabase.from('notifications').insert(notificationPayloads);
           if (dbError) console.error("[DB] Error saving notification history:", dbError);
 
-          // 📱 B. คัดแยกเอาเฉพาะคนที่มี fcm_token เพื่อยิงแจ้งเตือนเด้งบนมือถือ
-          const tokens = teamMembers.map(m => m.fcm_token).filter(Boolean);
+          // ส่ง FCM
+          for (const target of recipients) {
+            if (!target.fcm_token) continue;
 
-          if (tokens.length > 0) {
-            const response = await admin.messaging().sendEachForMulticast({
-              tokens: tokens,
-              notification: {
-                title: title,
-                body: bodyMsg,
-              },
-              data: {
-                orderId: order.id.toString(), // 👈 อันนี้แหละสำคัญ! เอาไว้ให้มือถือกดแล้วเด้งไปถูกหน้า
-                type: 'new_order'
+            try {
+              // 🌟 1. สร้างก้อนข้อมูลพื้นฐานที่จะส่งไปก่อน (มีแค่ข้อความ ไม่บอกเรื่องเสียง)
+              const messagePayload: any = {
+                token: target.fcm_token,
+                notification: {
+                  title: title,
+                  body: bodyMsg,
+                },
+                data: {
+                  orderId: order.id.toString(),
+                  type: 'new_order'
+                }
+              };
+
+              // 🌟 2. เช็กว่า "ถ้าไม่ได้ปิดเสียง (!target.is_muted)" ค่อยแนบคำสั่งเปิดเสียงเข้าไป
+              if (!target.is_muted) {
+                messagePayload.android = { notification: { sound: 'default' } };
+                messagePayload.apns = { payload: { aps: { sound: 'default' } } };
               }
-            });
-            console.log(`[FCM] ส่งแจ้งเตือนสำเร็จ: ${response.successCount}, พลาด: ${response.failureCount}`);
+
+              // 🌟 3. ยิงเลย!
+              await admin.messaging().send(messagePayload);
+              
+            } catch (fcmErr) {
+              console.error(`[FCM] Failed to send to ${target.id}:`, fcmErr);
+            }
           }
+          console.log(`[FCM] ดำเนินการส่งแจ้งเตือนให้ผู้รับทั้งหมด ${recipients.length} คนเรียบร้อยครับนาย!`);
         }
-      } catch (err) {
-        console.error('[FCM] Error process notifications:', err);
       }
+    } catch (err) {
+      console.error('[FCM] Error process notifications:', err);
     }
 
+    // 🌟 🌟 🌟 นี่คือส่วนที่โดนลบหายไปครับนาย! 🌟 🌟 🌟
     return NextResponse.json({ success: true, orderId: order.id });
 
   } catch (err: any) {

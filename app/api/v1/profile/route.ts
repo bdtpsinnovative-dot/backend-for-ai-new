@@ -1,25 +1,27 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
+// --------------------------------------------------------
+// 1. ฟังก์ชัน POST (ดึงข้อมูลโปรไฟล์)
+// --------------------------------------------------------
 export async function POST(request: Request) {
   try {
     const { token } = await request.json();
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const supabaseUrl = process.env.SUPABASE_URL!;
-    const supabaseAnonKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!; // ใช้ Service Role เพื่อ bypass RLS ในบางกรณี
 
-    // สร้าง Client
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // ✅ 1. ตรวจสอบก่อนว่า Token นี้คือใคร (Get User ID)
+    // ✅ 1. ตรวจสอบ Token
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     
     if (authError || !user) {
       return NextResponse.json({ error: 'Invalid or Expired Token' }, { status: 401 });
     }
 
-    // ✅ 2. ดึงโปรไฟล์โดยระบุ ID ของ User คนนั้นให้ชัดเจน
+    // ✅ 2. ดึงโปรไฟล์ (รวมคอลัมน์ noti_level และ is_muted ที่เราเพิ่มใหม่)
     const { data: profile, error } = await supabase
       .from('profiles')
       .select(`
@@ -29,18 +31,22 @@ export async function POST(request: Request) {
           description
         )
       `)
-      .eq('id', user.id) // ดึงเฉพาะของตัวเองเท่านั้น
-      .maybeSingle(); // ใช้ maybeSingle เพื่อไม่ให้ Error ถ้ายังไม่มีแถวข้อมูล
+      .eq('id', user.id)
+      .maybeSingle();
 
     if (error) {
        console.error("💥 Database Error:", error.message);
        return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    // ถ้าไม่มีข้อมูลโปรไฟล์เลย (Row ไม่เคยถูกสร้าง)
     if (!profile) {
       return NextResponse.json({ 
-        profile: { email: user.email, full_name: 'รอกำหนดชื่อ' },
+        profile: { 
+          email: user.email, 
+          full_name: 'รอกำหนดชื่อ',
+          noti_level: 'team', // ค่า Default ถ้าหาไม่เจอ
+          is_muted: false 
+        },
         message: 'Profile record not found' 
       });
     }
@@ -53,29 +59,21 @@ export async function POST(request: Request) {
   }
 }
 
-// ... ส่วน PUT (อัปเดต) ให้ใช้หลักการเช็ค user.id จาก token เหมือนกันครับ ...
-
 // --------------------------------------------------------
-// 2. ฟังก์ชัน PUT (บันทึกข้อมูล + รูปภาพ)
+// 2. ฟังก์ชัน PUT (บันทึกการเปลี่ยนแปลงข้อมูล)
 // --------------------------------------------------------
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const { token, full_name, phone_number, avatar_url } = body;
+    const { token, full_name, phone_number, avatar_url, noti_level, is_muted } = body;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+    const supabaseUrl = process.env.SUPABASE_URL!;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json({ error: 'Server Config Error' }, { status: 500 });
-    }
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-
-    // เช็ก User
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    // ตรวจสอบ Token
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return NextResponse.json({ error: 'Invalid Token' }, { status: 401 });
 
     // ✅ เตรียมข้อมูลอัปเดต
@@ -85,9 +83,15 @@ export async function PUT(request: Request) {
       updated_at: new Date().toISOString() 
     };
 
-    // ✅ ถ้ามีรููปส่งมา ให้อัปเดตด้วย
-    if (avatar_url) {
-      updateData.avatar_url = avatar_url;
+    if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
+    
+    // ✅ บังคับแปลง Type ให้ชัวร์ 100% ว่าตรงกับ Database
+    if (noti_level !== undefined) {
+      updateData.noti_level = String(noti_level); 
+    }
+    if (is_muted !== undefined) {
+      // แปลงเป็น Boolean ให้แน่ใจ
+      updateData.is_muted = is_muted === true || is_muted === 'true' || is_muted === 1; 
     }
 
     const { error: updateError } = await supabase
@@ -95,11 +99,15 @@ export async function PUT(request: Request) {
       .update(updateData)
       .eq('id', user.id);
 
-    if (updateError) return NextResponse.json({ error: updateError.message }, { status: 400 });
+    if (updateError) {
+      console.error("💥 Update Error:", updateError.message);
+      return NextResponse.json({ error: updateError.message }, { status: 400 });
+    }
 
     return NextResponse.json({ message: 'Success' });
 
   } catch (err: any) {
+    console.error("💥 Server Error:", err);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
