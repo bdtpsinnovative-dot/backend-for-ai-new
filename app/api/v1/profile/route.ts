@@ -7,7 +7,7 @@ export async function POST(request: Request) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const supabaseUrl = process.env.SUPABASE_URL!;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseAnonKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
     // สร้าง Client
     const supabase = createClient(supabaseUrl, supabaseAnonKey);

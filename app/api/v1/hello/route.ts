@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 // สร้างตัวเชื่อมต่อกับ Supabase (อยู่ฝั่ง Server ปลอดภัย 100%)
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
 export async function POST(req: Request) {

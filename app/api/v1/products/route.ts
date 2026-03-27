@@ -6,16 +6,22 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const keyword = searchParams.get('keyword') || '';
     
+    // 🌟 รับค่า page และ limit จากแอป Flutter
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '50');
+    const offset = (page - 1) * limit;
+    
     // ✅ ดึงจาก .env ตามความฉลาดของพี่ชายเป๊ะๆ ปลอดภัย 100%
     const supabaseUrl = process.env.SUPABASE_URL;
-      const supabaseAnonKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseAnonKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     // ดักไว้หน่อย เผื่อลืมใส่ .env
     if (!supabaseUrl || !supabaseAnonKey) {
       return NextResponse.json({ error: 'Server Config Error: Missing Supabase Env Variables' }, { status: 500 });
     }
 
-    let url = `${supabaseUrl}/rest/v1/products?select=*,product_variants(*)&order=id.asc`;
+    // 🌟 ใส่ limit และ offset ใน URL ของ Supabase
+    let url = `${supabaseUrl}/rest/v1/products?select=*,product_variants(*)&order=id.asc&limit=${limit}&offset=${offset}`;
     
     // 🚀 จุดที่แก้ใหม่: รองรับการค้นหาครอบจักรวาล
     if (keyword) {
@@ -73,4 +79,4 @@ export async function GET(request: Request) {
     console.error("Fetch Products Error:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
-} 
+}
