@@ -43,14 +43,34 @@ export async function GET(req: Request) {
               account_developer, contact_developer, 
               account_architecture, contact_architecture, 
               account_interior, contact_interior, 
-              account_contractor, contact_contractor
+              account_contractor, contact_contractor,
+              is_deleted
             )
           )
         `)
         .eq('is_synced', false);
 
       if (error) throw error;
-      return NextResponse.json(data);
+
+      // ==========================================
+      // 🛡️ กรองไม่ให้เอาข้อมูลที่ "ลบแล้ว" ส่งไปที่ Sheet
+      // ==========================================
+      const cleanData = (data || []).map((order: any) => {
+        const cleanItems = (order.order_items || []).map((item: any) => {
+          // เลือกเอาเฉพาะโปรเจกต์ที่ is_deleted ไม่ใช่ true
+          const cleanProjects = (item.order_item_projects || []).filter(
+            (proj: any) => proj.is_deleted !== true
+          );
+          return { ...item, order_item_projects: cleanProjects };
+        })
+        .filter((item: any) => item.order_item_projects.length > 0);
+
+        return { ...order, order_items: cleanItems };
+      })
+      .filter((order: any) => order.order_items.length > 0);
+
+      // คืนค่าข้อมูลเฉพาะตัวที่สะอาดให้ Sheet เอาไปลง
+      return NextResponse.json(cleanData);
     }
   } catch (error: any) {
     console.error('API Error:', error.message);
@@ -79,11 +99,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Orders marked as synced' });
     } 
     
-    // ✅ Action: แก้ไขข้อมูลจาก Google Sheets (รองรับการแก้ข้ามตาราง)
+    // ✅ Action: แก้ไขข้อมูลจาก Google Sheets
     else if (action === 'update_project') {
-      const { id, updates } = payload; // id คือ ID ของ order_item_projects (คอลัมน์ T)
+      const { id, updates } = payload; 
 
-      // 1. แยก Field ระหว่างตาราง Items (I, J) และ Projects (H, K, L-S)
       const itemFields = ['note', 'interest_level'];
       const itemUpdates: any = {};
       const projectUpdates: any = {};
@@ -96,7 +115,6 @@ export async function POST(req: Request) {
         }
       });
 
-      // 2. อัปเดตตาราง order_item_projects (ข้อมูลโปรเจกต์)
       if (Object.keys(projectUpdates).length > 0) {
         const { error: projErr } = await supabase
           .from('order_item_projects')
@@ -105,9 +123,7 @@ export async function POST(req: Request) {
         if (projErr) throw projErr;
       }
 
-      // 3. อัปเดตตาราง order_items (Note และความสนใจ)
       if (Object.keys(itemUpdates).length > 0) {
-        // หา order_item_id จากตาราง project ก่อนเพื่อไปอัปเดตตารางแม่
         const { data: proj, error: findErr } = await supabase
           .from('order_item_projects')
           .select('order_item_id')

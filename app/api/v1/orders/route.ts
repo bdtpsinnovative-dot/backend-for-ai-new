@@ -1,6 +1,38 @@
 // app/api/v1/orders/route.ts
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import * as admin from 'firebase-admin';
+
+// ==================================================
+// 🔔 1. เตรียมใช้งาน Firebase Admin (ทำแค่ครั้งเดียว)
+// ==================================================
+if (!admin.apps.length) {
+  try {
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+    if (projectId && clientEmail && privateKey) {
+      if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+        privateKey = privateKey.substring(1, privateKey.length - 1);
+      }
+      privateKey = privateKey.replace(/\\n/g, '\n');
+
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: projectId,
+          clientEmail: clientEmail,
+          privateKey: privateKey,
+        }),
+      });
+      console.log('✅ Firebase Admin Initialized Successfully!');
+    } else {
+      console.warn('⚠️ Missing Firebase Environment Variables.');
+    }
+  } catch (error) {
+    console.error('❌ Firebase admin initialization error:', error);
+  }
+}
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -44,7 +76,7 @@ export async function POST(request: Request) {
     let typeName = '';
 
     const [profileRes, companyRes, typeRes] = await Promise.all([
-      currentUserId ? supabase.from('profiles').select('team_id').eq('id', currentUserId).maybeSingle() : Promise.resolve({ data: null }),
+      currentUserId ? supabase.from('profiles').select('team_id, full_name').eq('id', currentUserId).maybeSingle() : Promise.resolve({ data: null }),
       company_id ? supabase.from('companies').select('name').eq('id', company_id).maybeSingle() : Promise.resolve({ data: null }),
       customer_type_id ? supabase.from('customer_types').select('name').eq('id', customer_type_id).maybeSingle() : Promise.resolve({ data: null }),
     ]);
@@ -52,6 +84,7 @@ export async function POST(request: Request) {
     team_id = profileRes.data?.team_id;
     companyName = companyRes.data?.name;
     typeName = typeRes.data?.name || '';
+    const creatorName = profileRes.data?.full_name || 'เพื่อนร่วมทีม'; 
 
     const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
 
@@ -72,14 +105,12 @@ export async function POST(request: Request) {
     if (orderError) throw orderError;
     
     // 📦 2. ตรวจสอบ Items ที่ส่งมา
-    // 🌟 ถ้าเซลล์ไม่ได้กดเพิ่ม Item เลย (items ว่างเปล่า) เราจำลอง Item ปลอมขึ้นมา 1 อัน เพื่อให้มันไปสร้าง Project ต่อได้
     let orderItemsToProcess = items && Array.isArray(items) && items.length > 0 ? items : [{}];
 
     const { data: allProjects } = await supabase.from('projects').select('id, project_name');
     const projectMap = new Map(allProjects?.map(p => [p.id, p.project_name]) || []);
 
     for (const item of orderItemsToProcess) {
-        
       let itemImageUrls: string[] = [];
       if (item.images && Array.isArray(item.images)) {
         for (let i = 0; i < item.images.length; i++) {
@@ -95,7 +126,6 @@ export async function POST(request: Request) {
         }
       }
 
-      // 📝 3. เซฟเข้า order_items เสมอ (ต่อให้ไม่มีหมวดหมู่ก็ต้องสร้าง เพื่อเป็นสะพานไปหา Project)
       const { data: savedItem, error: itemError } = await supabase
         .from('order_items')
         .insert({
@@ -107,14 +137,12 @@ export async function POST(request: Request) {
         })
         .select().single();
 
-      if (itemError) continue; // ถ้าพังจริงๆ ถึงจะข้าม
+      if (itemError) continue;
 
-      // 🏗️ 4. จัดการ order_item_projects (หัวใจหลักของระบบพี่)
       let projectUsagePayload = [];
       const hasProjectUsage = item.project_usage && Array.isArray(item.project_usage) && item.project_usage.length > 0;
 
       if (hasProjectUsage) {
-        // กรณีเซลล์เลือกโปรเจกต์มาปกติ
         projectUsagePayload = item.project_usage.map((usage: any) => {
           const pName = projectMap.get(usage.project_id) || '-';
           let projectRow: any = {
@@ -125,17 +153,67 @@ export async function POST(request: Request) {
           return injectCompanyNames(projectRow, typeName, companyName);
         });
       } else {
-        // 🌟 กรณีเซลล์ไม่ได้เลือกโปรเจกต์เลย! สร้างโปรเจกต์ "ว่าง" ยัดให้ทันที (0 ตร.ม.)
         let fallbackProjectRow: any = {
             order_item_id: savedItem.id,
-            project_name: 'ไม่มีการระบุโครงการ', // ระบุชื่อชัดเจน
-            area_sqm: 0 // บังคับเป็น 0
+            project_name: 'ไม่มีการระบุโครงการ',
+            area_sqm: 0 
         };
         projectUsagePayload.push(injectCompanyNames(fallbackProjectRow, typeName, companyName));
       }
 
-      // บันทึกลงตาราง Order Item Projects
       await supabase.from('order_item_projects').insert(projectUsagePayload);
+    }
+
+    // ==================================================
+    // 🔔 5. สร้างประวัติแจ้งเตือนลง DB + ยิง FCM ไปหามือถือ
+    // ==================================================
+    if (team_id) {
+      try {
+        // 🌟 ดึงข้อมูลเพื่อนในทีมทุกคน "รวมถึงคนที่ไม่ได้เปิดแจ้งเตือน" เพื่อบันทึกลง DB
+        const { data: teamMembers } = await supabase
+          .from('profiles')
+          .select('id, fcm_token') // ดึง id มาด้วยเพื่อใช้เป็น recipient_id
+          .eq('team_id', team_id)
+          .neq('id', currentUserId);
+
+        if (teamMembers && teamMembers.length > 0) {
+          const customerDisplay = companyName || customer_name || 'ลูกค้าทั่วไป';
+          const title = 'ออเดอร์ใหม่เข้าทีม!';
+          const bodyMsg = `${creatorName} เพิ่มรายการจาก ${customerDisplay}`;
+
+          // 💾 A. บันทึกประวัติแจ้งเตือนลง Database ก่อน
+          const notificationPayloads = teamMembers.map(member => ({
+            recipient_id: member.id,
+            creator_id: currentUserId,
+            title: title,
+            body: bodyMsg,
+            order_id: order.id
+          }));
+
+          const { error: dbError } = await supabase.from('notifications').insert(notificationPayloads);
+          if (dbError) console.error("[DB] Error saving notification history:", dbError);
+
+          // 📱 B. คัดแยกเอาเฉพาะคนที่มี fcm_token เพื่อยิงแจ้งเตือนเด้งบนมือถือ
+          const tokens = teamMembers.map(m => m.fcm_token).filter(Boolean);
+
+          if (tokens.length > 0) {
+            const response = await admin.messaging().sendEachForMulticast({
+              tokens: tokens,
+              notification: {
+                title: title,
+                body: bodyMsg,
+              },
+              data: {
+                orderId: order.id.toString(), // 👈 อันนี้แหละสำคัญ! เอาไว้ให้มือถือกดแล้วเด้งไปถูกหน้า
+                type: 'new_order'
+              }
+            });
+            console.log(`[FCM] ส่งแจ้งเตือนสำเร็จ: ${response.successCount}, พลาด: ${response.failureCount}`);
+          }
+        }
+      } catch (err) {
+        console.error('[FCM] Error process notifications:', err);
+      }
     }
 
     return NextResponse.json({ success: true, orderId: order.id });
@@ -146,7 +224,7 @@ export async function POST(request: Request) {
   }
 }
 
-// ฟังก์ชันช่วยเหลือสำหรับหยอดชื่อบริษัทลงช่อง Account (DRY Code)
+// ฟังก์ชันช่วยเหลือสำหรับหยอดชื่อบริษัท
 function injectCompanyNames(projectRow: any, typeName: string, companyName: string | null) {
   const typeStr = typeName.toLowerCase();
   if (typeStr.includes('developer')) projectRow.account_developer = companyName;
