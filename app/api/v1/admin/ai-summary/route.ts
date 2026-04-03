@@ -140,16 +140,27 @@ export async function GET(request: Request) {
     const totalSqm = stats.reduce((acc: number, curr: any) => acc + (Number(curr.area_sqm) || 0), 0);
     const importantCount = stats.filter((s: any) => s.is_important).length;
     
+    // ✅ โค้ดใหม่ (เก็บทั้งยอดโครงการ และยอด ตร.ม.)
     const teamSummary: any = {};
     const personSummary: any = {}; 
 
     stats.forEach((s: any) => {
+      const areaSqm = Number(s.area_sqm) || 0; // ดึงพื้นที่ของโปรเจกต์นี้มา
+
       toArray(s.order_items).forEach((item: any) => {
         toArray(item.orders).forEach((o: any) => {
           const teamName = o?.teams?.team_name || 'ไม่มีทีม';
           const personName = o?.profiles?.full_name || 'ไม่ระบุตัวตน';
-          teamSummary[teamName] = (teamSummary[teamName] || 0) + 1;
-          personSummary[personName] = (personSummary[personName] || 0) + 1;
+
+          // อัปเดตยอดทีม
+          if (!teamSummary[teamName]) teamSummary[teamName] = { count: 0, area: 0 };
+          teamSummary[teamName].count += 1;
+          teamSummary[teamName].area += areaSqm;
+
+          // อัปเดตยอดบุคคล
+          if (!personSummary[personName]) personSummary[personName] = { count: 0, area: 0 };
+          personSummary[personName].count += 1;
+          personSummary[personName].area += areaSqm;
         });
       });
     });
